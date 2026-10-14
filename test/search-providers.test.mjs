@@ -539,6 +539,33 @@ test("SearXNG keeps the loopback exemption on the configured origin and blocks a
 	assert.match(output.pivotError, /Blocked internal address/);
 });
 
+test("SearXNG keeps the loopback exemption off another port on the same loopback host", async () => {
+	const home = await mkdtemp(join(tmpdir(), "pi-web-access-searxng-port-"));
+	const child = runChild(`
+		const { writeFileSync } = await import("node:fs");
+		writeFileSync(${JSON.stringify(home)} + "/web-search.json", JSON.stringify({ searxngBaseUrl: "http://127.0.0.1:8888" }));
+		const calls = [];
+		globalThis.fetch = async (url) => {
+			calls.push(String(url));
+			if (calls.length === 1) return new Response("", { status: 302, headers: { location: "http://127.0.0.1:9999/search?q=port&format=json" } });
+			return new Response(JSON.stringify({ results: [] }), { status: 200 });
+		};
+		const { searchWithSearXNG } = await import(${JSON.stringify(searxngModuleUrl)});
+		let portError = null;
+		try { await searchWithSearXNG("port"); }
+		catch (err) { portError = err.message; }
+		console.log(JSON.stringify({ calls, portError }));
+	`, {
+		HOME: home,
+		USERPROFILE: home,
+		PI_CODING_AGENT_DIR: home,
+	});
+	assert.equal(child.status, 0, child.stderr);
+	const output = JSON.parse(child.stdout.trim());
+	assert.deepEqual(output.calls, ["http://127.0.0.1:8888/search?q=port&format=json"]);
+	assert.match(output.portError, /Blocked internal address/);
+});
+
 test("SearXNG search merges configured custom headers", async () => {
 	const home = await mkdtemp(join(tmpdir(), "pi-web-access-searxng-headers-"));
 	const child = runChild(`
